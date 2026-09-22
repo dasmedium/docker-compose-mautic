@@ -1,0 +1,87 @@
+# Local development stack for this repository.
+#
+# This file is NOT used in production. Production desired state lives in
+# dasmedium/vps-mgmt under applications/mautic/ and runs under rootless Docker
+# behind the platform Traefik. This stack is for building and testing the image
+# locally.
+
+name: mautic-dev
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: local-root
+      MYSQL_DATABASE: mautic
+      MYSQL_USER: mautic
+      MYSQL_PASSWORD: local-mautic
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  init:
+    build: .
+    entrypoint: ["/usr/local/bin/mautic-init"]
+    environment:
+      MAUTIC_DB_HOST: db
+      MAUTIC_DB_PORT: "3306"
+      MAUTIC_DB_DATABASE: mautic
+      MAUTIC_DB_USER: mautic
+      MAUTIC_DB_PASSWORD: local-mautic
+      MAUTIC_URL: http://localhost:8080
+    secrets:
+      - mautic_admin_email
+      - mautic_admin_password
+    volumes:
+      - config:/var/www/html/config
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: .
+    entrypoint: ["/usr/local/bin/mautic-web-entrypoint"]
+    command: ["apache2-foreground"]
+    user: "33:33"
+    ports:
+      - "8080:8080"
+    environment:
+      MAUTIC_DB_HOST: db
+      MAUTIC_DB_PORT: "3306"
+      MAUTIC_DB_DATABASE: mautic
+      MAUTIC_DB_USER: mautic
+      MAUTIC_DB_PASSWORD: local-mautic
+      MAUTIC_URL: http://localhost:8080
+      MAUTIC_MESSENGER_DSN_EMAIL: doctrine://default
+      MAUTIC_MESSENGER_DSN_HIT: doctrine://default
+      DOCKER_MAUTIC_ROLE: mautic_web
+    volumes:
+      - config:/var/www/html/config
+      - media_files:/var/www/html/docroot/media/files
+      - media_images:/var/www/html/docroot/media/images
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  mysql-data:
+  config:
+  media_files:
+  media_images:
+
+secrets:
+  mautic_admin_email:
+    file: ./deploy/secrets.local/admin_email
+  mautic_admin_password:
+    file: ./deploy/secrets.local/admin_password

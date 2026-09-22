@@ -6,20 +6,74 @@ on:
       - master
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Shellcheck scripts
+      - name: Shellcheck entrypoints
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck scripts/*.sh setup-dc.sh
+          shellcheck deploy/*.sh
 
-      - name: Validate compose config
-        env:
-          COMPOSE_PROJECT_NAME: mautic
+      - name: Build image
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local image for validation
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mautic-validate:ci
+
+      - name: Validate runtime contract and manifest agreement
         run: |
-          docker compose config -q
+          docker image inspect mautic-validate:ci --format '{{json .Config.Labels}}' > /tmp/labels.json
+          python3 - <<'PY'
+          import json
+          import sys
+
+          import yaml
+
+          prefix = "dev.vpsmgmt.contract.v1"
+          labels = json.load(open("/tmp/labels.json"))
+          if labels.get(prefix) != "1":
+              sys.exit("image does not declare the vps-mgmt contract")
+
+          manifest = yaml.safe_load(open("deploy/manifest.yaml"))
+          label_env = {e["name"]: e for e in json.loads(labels["%s.env" % prefix])}
+          manifest_env = {e["name"]: e for e in manifest["env"]}
+          if label_env.keys() != manifest_env.keys():
+              sys.exit("env names differ between labels and deploy/manifest.yaml")
+          for name, entry in label_env.items():
+              if bool(entry.get("secret")) != bool(manifest_env[name].get("secret")):
+                  sys.exit("secret flag differs for %s" % name)
+
+          label_ports = json.loads(labels["%s.ports" % prefix])
+          if [p["container"] for p in label_ports] != [p["container"] for p in manifest["ports"]]:
+              sys.exit("ports differ between labels and deploy/manifest.yaml")
+
+          label_health = json.loads(labels["%s.healthcheck" % prefix])
+          if label_health["test"] != manifest["healthcheck"]["test"]:
+              sys.exit("healthcheck test differs between labels and deploy/manifest.yaml")
+
+          if json.loads(labels["%s.volumes" % prefix]) != manifest["volumes"]:
+              sys.exit("volumes differ between labels and deploy/manifest.yaml")
+
+          label_res = json.loads(labels["%s.resources" % prefix])
+          if (str(label_res["cpus"]), str(label_res["memory"])) != (
+              str(manifest["resources"]["cpus"]),
+              str(manifest["resources"]["memory"]),
+          ):
+              sys.exit("resources differ between labels and deploy/manifest.yaml")
+
+          if labels.get("%s.run-user" % prefix) != str(manifest["run_user"]):
+              sys.exit("run_user differs between labels and deploy/manifest.yaml")
+
+          print("contract labels and deploy/manifest.yaml agree")
+          PY

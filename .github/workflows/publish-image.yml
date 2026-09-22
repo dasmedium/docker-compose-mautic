@@ -1,0 +1,149 @@
+name: Publish Mautic image
+
+# Test -> build -> scan -> publish an immutable image to GHCR, then propose a
+# release PR in dasmedium/vps-mgmt. This repository never deploys to
+# production and never holds production secrets or SSH access.
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build-scan-publish:
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint shell entrypoints
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck deploy/*.sh
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build local image for validation
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: mautic-validate:ci
+
+      - name: Validate runtime contract against the image labels
+        run: |
+          docker image inspect mautic-validate:ci --format '{{json .Config.Labels}}' > /tmp/labels.json
+          python3 - <<'PY'
+          import json
+          import sys
+
+          labels = json.load(open("/tmp/labels.json"))
+          prefix = "dev.vpsmgmt.contract.v1"
+          if labels.get(prefix) != "1":
+              sys.exit("image does not declare the vps-mgmt contract")
+          for key in ("env", "ports", "healthcheck", "volumes", "resources"):
+              if not labels.get("%s.%s" % (prefix, key)):
+                  sys.exit("contract label %s.%s is empty" % (prefix, key))
+          if labels.get("%s.run-user" % prefix) != "33":
+              sys.exit("contract run-user must be 33")
+          env = json.loads(labels["%s.env" % prefix])
+          secrets = {e["name"] for e in env if e.get("secret") and not e.get("optional")}
+          if "MAUTIC_DB_PASSWORD" not in secrets:
+              sys.exit("MAUTIC_DB_PASSWORD must be a required secret")
+          print("contract labels valid:", sorted(e["name"] for e in env))
+          PY
+
+      - name: Verify deploy/manifest.yaml agrees with the image labels
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          import yaml
+
+          prefix = "dev.vpsmgmt.contract.v1"
+          labels = json.loads(
+              subprocess.check_output(
+                  ["docker", "image", "inspect", "mautic-validate:ci", "--format", "{{json .Config.Labels}}"],
+                  text=True,
+              )
+          )
+          manifest = yaml.safe_load(open("deploy/manifest.yaml"))
+          label_env = {e["name"]: e for e in json.loads(labels["%s.env" % prefix])}
+          manifest_env = {e["name"]: e for e in manifest["env"]}
+          if label_env.keys() != manifest_env.keys():
+              sys.exit("env names differ: labels=%s manifest=%s" % (sorted(label_env), sorted(manifest_env)))
+          for name, entry in label_env.items():
+              if bool(entry.get("secret")) != bool(manifest_env[name].get("secret")):
+                  sys.exit("secret flag differs for %s" % name)
+          label_ports = json.loads(labels["%s.ports" % prefix])
+          if [p["container"] for p in label_ports] != [p["container"] for p in manifest["ports"]]:
+              sys.exit("ports differ between labels and manifest")
+          label_health = json.loads(labels["%s.healthcheck" % prefix])
+          if label_health["test"] != manifest["healthcheck"]["test"]:
+              sys.exit("healthcheck test differs between labels and manifest")
+          label_vols = json.loads(labels["%s.volumes" % prefix])
+          if label_vols != manifest["volumes"]:
+              sys.exit("volumes differ between labels and manifest")
+          label_res = json.loads(labels["%s.resources" % prefix])
+          if str(label_res["cpus"]) != str(manifest["resources"]["cpus"]) or str(label_res["memory"]) != str(manifest["resources"]["memory"]):
+              sys.exit("resources differ between labels and manifest")
+          print("manifest matches image contract labels")
+          PY
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: mautic-validate:ci
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:6.0.5
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  release-pr:
+    needs: build-scan-publish
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: dasmedium/vps-mgmt/.github/workflows/create-release-pr.yml@main
+    with:
+      app: mautic
+      image: ghcr.io/${{ github.repository }}@${{ needs.build-scan-publish.outputs.digest }}
+      release_ref: ${{ github.sha }}
+      build_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      notes: "Automated release from ${{ github.sha }}."
+    secrets:
+      token: ${{ secrets.VPS_MGMT_RELEASE_TOKEN }}
