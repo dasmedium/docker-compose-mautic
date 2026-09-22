@@ -15,7 +15,9 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  # Published as ghcr.io/dasmedium/mautic (matching vps-mgmt's ghcr_org) rather
+  # than ghcr.io/<owner>/<repo>, so the app is onboarded under a stable name.
+  IMAGE: ghcr.io/dasmedium/mautic
 
 jobs:
   build-scan-publish:
@@ -141,7 +143,7 @@ jobs:
     uses: dasmedium/vps-mgmt/.github/workflows/create-release-pr.yml@main
     with:
       app: mautic
-      image: ghcr.io/${{ github.repository }}@${{ needs.build-scan-publish.outputs.digest }}
+      image: ghcr.io/dasmedium/mautic@${{ needs.build-scan-publish.outputs.digest }}
       release_ref: ${{ github.sha }}
       build_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       notes: "Automated release from ${{ github.sha }}."
