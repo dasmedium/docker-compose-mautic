@@ -60,6 +60,16 @@ secrets are provisioned on the VPS by `vps-mgmt`
 `/var/lib/vps-mgmt/secrets/mautic/`. `deploy/secrets.local/` is git-ignored and
 is for local development only.
 
+Never pass a secret on a command line. The platform security contract forbids
+secrets in process arguments. Concretely:
+
+- `deploy/init.sh` writes the admin email/password into Mautic's `local.php`
+  (via `deploy/set-local-params.php`) and runs `mautic:install` with no
+  credential flags; `mautic:install` reads them from `local.php`.
+- `deploy/web-entrypoint.sh` probes MySQL with `MYSQL_PWD`, not
+  `mysqladmin --password=`. Do not reintroduce the base image's
+  `check_database_connection.sh`, which uses `--password=`.
+
 ## Publishing and releases
 
 `.github/workflows/publish-image.yml` publishes on push to `master` and calls

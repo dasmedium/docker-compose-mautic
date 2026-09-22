@@ -29,8 +29,30 @@ for var in MAUTIC_DB_HOST MAUTIC_DB_PORT MAUTIC_DB_DATABASE MAUTIC_DB_USER MAUTI
     fi
 done
 
-# Wait for the database to accept connections.
-/startup/check_database_connection.sh
+# Wait for the database to accept connections. The password is passed to the
+# client through MYSQL_PWD rather than a --password argument, so it does not
+# appear in the process table. (The base image's check_database_connection.sh
+# uses `--password=`, which would expose it.)
+db_ready() {
+    MYSQL_PWD="${MAUTIC_DB_PASSWORD}" mysqladmin \
+        --host="${MAUTIC_DB_HOST}" \
+        --port="${MAUTIC_DB_PORT}" \
+        --user="${MAUTIC_DB_USER}" \
+        ping >/dev/null 2>&1
+}
+
+attempt=0
+max_attempts=31
+until db_ready; do
+    attempt=$((attempt + 1))
+    if [ "${attempt}" -gt "${max_attempts}" ]; then
+        echo "ERROR: MySQL at ${MAUTIC_DB_HOST}:${MAUTIC_DB_PORT} is not responding" >&2
+        exit 1
+    fi
+    echo "MySQL is not ready yet, waiting... (${attempt}/${max_attempts})"
+    sleep 1
+done
+echo "MySQL is alive and well."
 
 # The base image ships a local.php template that pre-fills the DB credentials.
 if [ ! -f "${CONFIG_DIR}/local.php" ]; then

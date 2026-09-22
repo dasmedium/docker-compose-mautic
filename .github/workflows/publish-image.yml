@@ -140,7 +140,10 @@ jobs:
     if: github.event_name == 'push'
     permissions:
       contents: read
-    uses: dasmedium/vps-mgmt/.github/workflows/create-release-pr.yml@main
+    # Pinned to an immutable commit SHA (vps-mgmt main at onboarding). Bump
+    # deliberately when the reusable workflow changes, in the same cycle as
+    # the other application repositories.
+    uses: dasmedium/vps-mgmt/.github/workflows/create-release-pr.yml@24e922adb6b380894e4e5b05bd49b42915511ca2
     with:
       app: mautic
       image: ghcr.io/dasmedium/mautic@${{ needs.build-scan-publish.outputs.digest }}

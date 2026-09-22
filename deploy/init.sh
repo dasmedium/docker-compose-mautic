@@ -7,6 +7,11 @@
 #
 # It replaces the old setup-dc.sh host script: no SSH, no substituted secrets
 # on disk, all inputs arrive as environment or mounted secret files.
+#
+# Secret handling: admin credentials are read from secret files and written
+# into Mautic's local.php (mode-0600, on the persistent config volume), then
+# `mautic:install` reads them from local.php. Neither value is passed on the
+# command line, so it never appears in the process table or command logs.
 set -euo pipefail
 
 CONFIG_DIR="${MAUTIC_VOLUME_CONFIG:-/var/www/html/config}"
@@ -38,12 +43,15 @@ fi
 ADMIN_EMAIL="$(tr -d '\r\n' < "${ADMIN_EMAIL_FILE}")"
 ADMIN_PASSWORD="$(tr -d '\r\n' < "${ADMIN_PASSWORD_FILE}")"
 
+php /usr/local/bin/mautic-set-local-params \
+    "${CONFIG_DIR}/local.php" \
+    "admin_email=${ADMIN_EMAIL}" \
+    "admin_password=${ADMIN_PASSWORD}"
+php -l "${CONFIG_DIR}/local.php" >/dev/null
+
 echo "Installing Mautic at ${MAUTIC_URL}"
-php "$CONSOLE" mautic:install \
-    --force \
-    --admin_email "${ADMIN_EMAIL}" \
-    --admin_password "${ADMIN_PASSWORD}" \
-    "${MAUTIC_URL}"
+# No credential flags: install reads admin_email/admin_password from local.php.
+php "$CONSOLE" mautic:install --force "${MAUTIC_URL}"
 
 php "$CONSOLE" cache:clear
 echo "Mautic installation complete."

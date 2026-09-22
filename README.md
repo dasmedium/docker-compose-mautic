@@ -23,11 +23,13 @@ this repo  ->  test / build / scan / publish  ->  GHCR  ->  vps-mgmt reconciler
 - Apache listens on **8080** so the web role runs as `www-data` (uid 33) under
   rootless Docker.
 - The cron and worker roles keep the official entrypoint.
-- The web role uses `deploy/web-entrypoint.sh`: it waits for MySQL, runs
-  migrations once installed, trusts the container's own networks as reverse
-  proxies (Traefik), and execs Apache.
+- The web role uses `deploy/web-entrypoint.sh`: it waits for MySQL (via
+  `MYSQL_PWD`, never a `--password` argument), runs migrations once installed,
+  trusts the container's own networks as reverse proxies (Traefik), and execs
+  Apache.
 - The one-shot init service (`deploy/init.sh`) installs Mautic idempotently and
-  exits 0 on later runs.
+  exits 0 on later runs. It writes the admin credentials into `local.php` so
+  `mautic:install` needs no credential flags (nothing sensitive in argv).
 - The runtime contract is published as OCI labels and mirrored in
   `deploy/manifest.yaml` (see `docs/application-contract.md` in `vps-mgmt`).
 

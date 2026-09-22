@@ -25,7 +25,8 @@ ENV APACHE_RUN_DIR=/tmp/apache2 \
 
 COPY deploy/web-entrypoint.sh /usr/local/bin/mautic-web-entrypoint
 COPY deploy/init.sh /usr/local/bin/mautic-init
-RUN chmod 0755 /usr/local/bin/mautic-web-entrypoint /usr/local/bin/mautic-init
+COPY deploy/set-local-params.php /usr/local/bin/mautic-set-local-params
+RUN chmod 0755 /usr/local/bin/mautic-web-entrypoint /usr/local/bin/mautic-init /usr/local/bin/mautic-set-local-params
 
 # Runtime contract (see docs/application-contract.md in dasmedium/vps-mgmt).
 LABEL dev.vpsmgmt.contract.v1="1" \
