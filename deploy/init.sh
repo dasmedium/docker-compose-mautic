@@ -10,8 +10,9 @@
 #
 # Secret handling: admin credentials are read from secret files and written
 # into Mautic's local.php (mode-0600, on the persistent config volume), then
-# `mautic:install` reads them from local.php. Neither value is passed on the
-# command line, so it never appears in the process table or command logs.
+# `mautic:install` reads them from local.php. The values are handed to the
+# helper as file paths, never as arguments, so no secret appears in the process
+# table or command logs.
 set -euo pipefail
 
 CONFIG_DIR="${MAUTIC_VOLUME_CONFIG:-/var/www/html/config}"
@@ -40,13 +41,11 @@ if [ ! -s "${ADMIN_PASSWORD_FILE}" ]; then
     exit 1
 fi
 
-ADMIN_EMAIL="$(tr -d '\r\n' < "${ADMIN_EMAIL_FILE}")"
-ADMIN_PASSWORD="$(tr -d '\r\n' < "${ADMIN_PASSWORD_FILE}")"
-
+# Pass file paths only; the helper reads the values itself.
 php /usr/local/bin/mautic-set-local-params \
     "${CONFIG_DIR}/local.php" \
-    "admin_email=${ADMIN_EMAIL}" \
-    "admin_password=${ADMIN_PASSWORD}"
+    "admin_email_FILE=${ADMIN_EMAIL_FILE}" \
+    "admin_password_FILE=${ADMIN_PASSWORD_FILE}"
 php -l "${CONFIG_DIR}/local.php" >/dev/null
 
 echo "Installing Mautic at ${MAUTIC_URL}"
