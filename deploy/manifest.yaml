@@ -1,0 +1,52 @@
+# Human-readable mirror of the runtime contract published as OCI labels on the
+# image (see Dockerfile). Consumed by dasmedium/vps-mgmt when onboarding the
+# application; kept in sync with the labels so CI and reviewers can diff it.
+app: mautic
+env:
+  - name: MAUTIC_DB_HOST
+    type: string
+    optional: false
+  - name: MAUTIC_DB_PORT
+    type: int
+    optional: false
+  - name: MAUTIC_DB_DATABASE
+    type: string
+    optional: false
+  - name: MAUTIC_DB_USER
+    type: string
+    optional: false
+  - name: MAUTIC_DB_PASSWORD
+    type: string
+    optional: false
+    secret: true
+  - name: MAUTIC_URL
+    type: string
+    optional: false
+  - name: MAUTIC_MESSENGER_DSN_EMAIL
+    type: string
+    optional: false
+  - name: MAUTIC_MESSENGER_DSN_HIT
+    type: string
+    optional: false
+secrets:
+  - name: MAUTIC_DB_PASSWORD
+ports:
+  - container: 8080
+    protocol: tcp
+healthcheck:
+  test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ || exit 1"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+volumes:
+  - name: config
+    mount: /var/www/html/config
+  - name: media_files
+    mount: /var/www/html/docroot/media/files
+  - name: media_images
+    mount: /var/www/html/docroot/media/images
+resources:
+  cpus: "1.0"
+  memory: 768M
+run_user: 33

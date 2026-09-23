@@ -6,3 +6,6 @@ traefik.yml
 chat.txt
 setup-backup.sh
 docker-compose-local.yml
+
+# Local development secrets (compose.dev.yaml only)
+deploy/secrets.local/
